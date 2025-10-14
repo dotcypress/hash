@@ -1,0 +1,71 @@
+on: [push, pull_request]
+name: Hash
+jobs:
+  lints:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Install cross
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: --git https://github.com/cross-rs/cross cross
+      - name: ARMv7 Build
+        run: cross build --release --target=armv7-unknown-linux-musleabihf
+      - name: Copy ARMv7 binary
+        run: cp -f ./target/armv7-unknown-linux-musleabihf/release/hash hash
+      - name: Compress ARMv7 Build
+        uses: a7ul/tar-action@v1.1.0
+        with:
+          command: c
+          files: |
+            ./readme.md
+            ./LICENSE-MIT
+            ./LICENSE-APACHE
+            ./install.sh
+            ./hash.service
+            ./hash
+          outPath: hash_${{ github.ref_name }}.armv7.tar.gz
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: hash-installers
+          path: hash_*.tar.gz
+          retention-days: 7
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            hash_${{ github.ref_name }}.armv7.tar.gz

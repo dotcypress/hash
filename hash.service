@@ -1,0 +1,12 @@
+[Unit]
+Description=Hash
+
+[Service]
+Type=simple
+Environment=HASH_HOST='omega-488652'
+Environment=HASH_DECODER='openssl aes-256-cbc -d -pbkdf2 -pass pass:H@x0r'
+Environment=HASH_ENCODER='openssl aes-256-cbc -e -pbkdf2 -pass pass:H@x0r'
+ExecStart=/usr/local/bin/hash -w /media/hash
+
+[Install]
+WantedBy=multi-user.target
