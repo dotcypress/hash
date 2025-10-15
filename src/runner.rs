@@ -5,7 +5,6 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    thread,
 };
 
 pub const SCRIPT_SUFFIX: &str = ".ha.sh";
@@ -162,24 +161,17 @@ impl Runner {
         ));
         fs::create_dir(&run_dir).map_err(Error::IO)?;
 
-        let runner = self.clone();
-        let script = script.clone();
-        let handle = thread::spawn(move || {
-            if let Err(err) = runner.run(&script, &run_dir) {
-                run_dir.push("error.log");
-                fs::write(run_dir, format!("{}", err))
-                    .map_err(Error::IO)
-                    .ok();
-            }
-            Command::new("sync").output().ok();
-        });
-        if wait {
-            handle.join().ok();
+        if let Err(err) = self.run(&script, &run_dir, wait) {
+            run_dir.push("error.log");
+            fs::write(run_dir, format!("{}", err))
+                .map_err(Error::IO)
+                .ok();
         }
+
         Ok(())
     }
 
-    fn run(self, script: &Script, run_dir: &Path) -> Result<(), Error> {
+    fn run(&self, script: &Script, run_dir: &Path, wait: bool) -> Result<(), Error> {
         let script_len = fs::metadata(&script.path).map_err(Error::IO)?.len();
         if script_len > MAX_SCRIPT_SIZE {
             return Err(Error::UnsupportedScript(script.path.to_path_buf()));
@@ -192,34 +184,48 @@ impl Runner {
         let script_text = str::from_utf8(&buf)
             .map(|s| s.to_owned())
             .map_err(|_| Error::UnsupportedScript(script.path.to_path_buf()))?;
-        let decoder = self.decoder.clone().unwrap_or_default();
-        let encoder = self.encoder.clone().unwrap_or_default();
 
-        let Output { stdout, stderr, .. } = Command::new("sh")
-            .args(["-c", &script_text])
-            .current_dir(script.parent()?)
-            .env("HASH_HOST", &self.host_id)
-            .env("HASH_DECODER", decoder)
-            .env("HASH_ENCODER", encoder)
-            .env("HASH_SCRIPT", script.name())
-            .env("HASH_RUN_DIR", run_dir.to_str().unwrap_or_default())
-            .output() //TODO: fork?
-            .map_err(Error::IO)?;
+        let envs = [
+            ("HASH_HOST", self.host_id.clone()),
+            ("HASH_DECODER", self.decoder.clone().unwrap_or_default()),
+            ("HASH_ENCODER", self.encoder.clone().unwrap_or_default()),
+            ("HASH_SCRIPT", script.name()),
+            (
+                "HASH_RUN_DIR",
+                run_dir.to_str().unwrap_or_default().to_owned(),
+            ),
+        ];
 
-        if !stdout.is_empty() {
-            let mut path = run_dir.to_path_buf();
-            path.push("stdout.log");
-            let mut log = File::create(path).map_err(Error::IO)?;
-            self.transform(&stdout[..], &mut log, &self.encoder)?;
-            log.flush().map_err(Error::IO)?;
-        }
+        if wait {
+            let Output { stdout, stderr, .. } = Command::new("sh")
+                .envs(envs)
+                .args(["-c", &script_text])
+                .current_dir(script.parent()?)
+                .output()
+                .map_err(Error::IO)?;
 
-        if !stderr.is_empty() {
-            let mut path = run_dir.to_path_buf();
-            path.push("stderr.log");
-            let mut log = File::create(path).map_err(Error::IO)?;
-            self.transform(&stderr[..], &mut log, &self.encoder)?;
-            log.flush().map_err(Error::IO)?;
+            if !stdout.is_empty() {
+                let mut path = run_dir.to_path_buf();
+                path.push("stdout.log");
+                let mut log = File::create(path).map_err(Error::IO)?;
+                self.transform(&stdout[..], &mut log, &self.encoder)?;
+                log.flush().map_err(Error::IO)?;
+            }
+
+            if !stderr.is_empty() {
+                let mut path = run_dir.to_path_buf();
+                path.push("stderr.log");
+                let mut log = File::create(path).map_err(Error::IO)?;
+                self.transform(&stderr[..], &mut log, &self.encoder)?;
+                log.flush().map_err(Error::IO)?;
+            }
+        } else {
+            Command::new("sh")
+                .envs(envs)
+                .args(["-c", &script_text])
+                .current_dir(script.parent()?)
+                .spawn()
+                .map_err(Error::IO)?;
         }
 
         Ok(())

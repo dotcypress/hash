@@ -6,7 +6,11 @@ mod runner;
 
 fn main() -> Result<(), Error> {
     let cmd = Command::new("hash")
-        .about("Headless autorun")
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .help_template(
+            "{before-help}{name} {version}\n{about-with-newline}\n{usage-heading}{usage}{all-args}{after-help}",
+        )
         .arg_required_else_help(true)
         .args([
             Arg::new("id")
