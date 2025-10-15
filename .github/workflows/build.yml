@@ -58,7 +58,7 @@ jobs:
             ./hash
           outPath: hash_${{ github.ref_name }}.armv7.tar.gz
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hash-installers
           path: hash_*.tar.gz
