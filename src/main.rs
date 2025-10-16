@@ -23,11 +23,6 @@ fn main() -> Result<(), Error> {
                 .short('d')
                 .env("HASH_DECODER")
                 .help("Script decoder"),
-            Arg::new("encoder")
-                .long("encoder")
-                .short('e')
-                .env("HASH_ENCODER")
-                .help("Stdout encoder"),
         ])
         .arg(
             Arg::new("path")
@@ -53,8 +48,7 @@ fn main() -> Result<(), Error> {
         .map(String::from)
         .unwrap_or(format!("Hash host v{}", env!("CARGO_PKG_VERSION")));
     let decoder = cmd.get_one::<String>("decoder").map(String::from);
-    let encoder = cmd.get_one::<String>("encoder").map(String::from);
-    let runner = Runner::new(host_id, decoder, encoder);
+    let runner = Runner::new(host_id, decoder);
 
     #[cfg(target_os = "linux")]
     {
