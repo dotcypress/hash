@@ -1,8 +1,6 @@
 use chrono::Utc;
 use std::{
-    fmt,
-    fs::{self, File},
-    io::{self, Read, Write},
+    fmt, fs, io,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
 };
@@ -15,21 +13,21 @@ pub enum Error {
     IO(io::Error),
     ScriptNotFound(PathBuf),
     UnsupportedScript(PathBuf),
-    TransformFailed,
+    DecodeFailed(PathBuf),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::IO(err) => write!(f, "IO: {}", err),
-            Self::TransformFailed => write!(f, "Transform failed"),
+            Self::DecodeFailed(path) => write!(f, "Script decode failed: {:?}", path),
             Self::ScriptNotFound(path) => write!(f, "Script not found: {:?}", path),
             Self::UnsupportedScript(path) => write!(f, "Unsupported script: {:?}", path),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Script {
     path: PathBuf,
 }
@@ -42,7 +40,7 @@ impl Script {
             .unwrap_or_default()
         {
             Err(Error::UnsupportedScript(path.to_path_buf()))
-        } else if !path.is_file() {
+        } else if path.is_dir() {
             Err(Error::ScriptNotFound(path.to_path_buf()))
         } else {
             let path = path.canonicalize().map_err(Error::IO)?;
@@ -70,7 +68,7 @@ impl Script {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Runner {
     host_id: String,
     decoder: Option<String>,
@@ -181,32 +179,12 @@ impl Runner {
             return Err(Error::UnsupportedScript(script.path.to_path_buf()));
         }
 
-        let run_dir = run_dir.to_str().unwrap_or_default().to_owned();
-        let decoder = self.decoder.clone().unwrap_or("cat".to_owned());
-
+        let mut script_file = fs::File::open(&script.path).map_err(Error::IO)?;
         let mut buf = Vec::new();
-        let script_file = File::open(&script.path).map_err(Error::IO)?;
-        self.decode(script_file, &mut buf)?;
-        let script_text = str::from_utf8(&buf)
-            .map(|s| s.to_owned())
-            .map_err(|_| Error::UnsupportedScript(script.path.to_path_buf()))?;
 
-        Command::new("sh")
-            .env("HASH_SCRIPT", script.path())
-            .env("HASH_HOST", &self.host_id)
-            .env("HASH_DECODER", &decoder)
-            .args(["-c", &script_text])
-            .current_dir(run_dir)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(Error::IO)
-    }
-
-    fn decode(&self, mut reader: impl Read, mut writer: impl Write) -> Result<(), Error> {
         match &self.decoder {
             None => {
-                io::copy(&mut reader, &mut writer).map_err(Error::IO)?;
+                io::copy(&mut script_file, &mut buf).map_err(Error::IO)?;
             }
             Some(transform) => {
                 let mut cmd = Command::new("sh")
@@ -217,19 +195,35 @@ impl Runner {
                     .map_err(Error::IO)?;
 
                 if let Some(stdin) = &mut cmd.stdin {
-                    io::copy(&mut reader, stdin).map_err(Error::IO)?;
+                    io::copy(&mut script_file, stdin).map_err(Error::IO)?;
                 }
 
                 let result = cmd.wait().map_err(Error::IO)?;
                 if result.success() {
                     if let Some(mut stdout) = cmd.stdout {
-                        io::copy(&mut stdout, &mut writer).map_err(Error::IO)?;
+                        io::copy(&mut stdout, &mut buf).map_err(Error::IO)?;
                     }
                 } else {
-                    return Err(Error::TransformFailed);
+                    return Err(Error::DecodeFailed(script.path.to_path_buf()));
                 }
             }
         }
-        Ok(())
+
+        let script_text = str::from_utf8(&buf)
+            .map(|s| s.to_owned())
+            .map_err(|_| Error::UnsupportedScript(script.path.to_path_buf()))?;
+        let run_dir = run_dir.to_str().unwrap_or_default().to_owned();
+        let decoder = self.decoder.clone().unwrap_or("cat".to_owned());
+
+        Command::new("sh")
+            .args(["-c", &script_text])
+            .current_dir(run_dir)
+            .env("HASH_SCRIPT", script.path())
+            .env("HASH_HOST", &self.host_id)
+            .env("HASH_DECODER", &decoder)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(Error::IO)
     }
 }
