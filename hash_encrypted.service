@@ -1,0 +1,11 @@
+[Unit]
+Description=Headless encrypted/signed autorun
+
+[Service]
+Type=simple
+Environment=HASH_HOST='alpha-543904'
+Environment=HASH_DECODER='(openssl dgst -sha256 -verify /etc/hash/public_key.pem -signature $HASH_SCRIPT.signature && cat $HASH_SCRIPT) || openssl aes-256-cbc -d -pass file:/etc/hash/private_key.pem -in $HASH_SCRIPT'
+ExecStart=/usr/local/bin/hash -w /media/hash
+
+[Install]
+WantedBy=multi-user.target
