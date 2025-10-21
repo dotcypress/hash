@@ -13,6 +13,9 @@ fn main() -> Result<(), Error> {
         )
         .arg_required_else_help(true)
         .args([
+            Arg::new("path")
+                .required(true)
+                .help("Script path or directory"),
             Arg::new("id")
                 .long("id")
                 .short('i')
@@ -22,10 +25,8 @@ fn main() -> Result<(), Error> {
                 .long("decoder")
                 .short('d')
                 .env("HASH_DECODER")
+                .default_value("cat")
                 .help("Script decoder"),
-            Arg::new("path")
-                .required(true)
-                .help("Script path or directory"),
             Arg::new("watch")
                 .long("watch")
                 .short('w')
@@ -43,7 +44,10 @@ fn main() -> Result<(), Error> {
         .get_one::<String>("id")
         .map(String::from)
         .unwrap_or(format!("Hash host v{}", env!("CARGO_PKG_VERSION")));
-    let decoder = cmd.get_one::<String>("decoder").map(String::from);
+    let decoder = cmd
+        .get_one::<String>("decoder")
+        .map(String::from)
+        .expect("required");
     let runner = Runner::new(host_id, decoder);
 
     #[cfg(target_os = "linux")]

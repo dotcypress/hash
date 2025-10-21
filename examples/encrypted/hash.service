@@ -1,0 +1,11 @@
+[Unit]
+Description=Headless encrypted autorun
+
+[Service]
+Type=simple
+Environment=HASH_HOST='alpha-543904'
+Environment=HASH_DECODER='openssl aes-256-cbc -d -pass file:/etc/hash/private_key.pem'
+ExecStart=/usr/local/bin/hash -w /media/hash
+
+[Install]
+WantedBy=multi-user.target

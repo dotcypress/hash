@@ -1,0 +1,11 @@
+[Unit]
+Description=Headless signed autorun
+
+[Service]
+Type=simple
+Environment=HASH_HOST='beta-9255789'
+Environment=HASH_DECODER='openssl dgst -sha256 -verify /etc/hash/public_key.pem -signature $HASH_SCRIPT.signature && cat $HASH_SCRIPT'
+ExecStart=/usr/local/bin/hash -w /media/hash
+
+[Install]
+WantedBy=multi-user.target
