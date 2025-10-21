@@ -23,20 +23,16 @@ fn main() -> Result<(), Error> {
                 .short('d')
                 .env("HASH_DECODER")
                 .help("Script decoder"),
-        ])
-        .arg(
             Arg::new("path")
                 .required(true)
                 .help("Script path or directory"),
-        )
-        .arg(
             Arg::new("watch")
                 .long("watch")
                 .short('w')
                 .num_args(0)
                 .hide(cfg!(not(target_os = "linux")))
-                .help("Watch for removable media"),
-        )
+                .help("Watch for removable media")
+        ])
         .get_matches();
 
     let path = cmd
