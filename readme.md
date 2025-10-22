@@ -1,6 +1,6 @@
 # Hash
 
-Headless autorun.
+Headless autorun
 
 ## License
 

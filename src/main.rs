@@ -27,11 +27,11 @@ fn main() -> Result<(), Error> {
                 .env("HASH_DECODER")
                 .default_value("cat")
                 .help("Script decoder"),
+            #[cfg(target_os = "linux")]
             Arg::new("watch")
                 .long("watch")
                 .short('w')
                 .num_args(0)
-                .hide(cfg!(not(target_os = "linux")))
                 .help("Watch for removable media")
         ])
         .get_matches();
@@ -48,15 +48,11 @@ fn main() -> Result<(), Error> {
         .get_one::<String>("decoder")
         .map(String::from)
         .expect("required");
-    let runner = Runner::new(host_id, decoder);
 
     #[cfg(target_os = "linux")]
-    {
-        runner.start(&path, cmd.get_flag("watch"))
-    }
-
+    let watch = cmd.get_flag("watch");
     #[cfg(not(target_os = "linux"))]
-    {
-        runner.start(&path)
-    }
+    let watch = false;
+
+    Runner::run(host_id, decoder, &path, watch)
 }

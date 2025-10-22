@@ -75,55 +75,47 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(host_id: String, decoder: String) -> Self {
-        Self { host_id, decoder }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn start(&self, path: &Path) -> Result<(), Error> {
+    pub fn run(host_id: String, decoder: String, path: &Path, watch: bool) -> Result<(), Error> {
+        let runner = Self { host_id, decoder };
         if path.is_file() {
-            self.eval_script(path)
+            runner.eval_script(path)
+        } else if watch {
+            #[cfg(target_os = "linux")]
+            runner.watch(path)?;
+            Ok(())
         } else {
-            self.eval_dir(path)
+            runner.eval_dir(path)
         }
     }
 
     #[cfg(target_os = "linux")]
-    pub fn start(&self, path: &Path, watch: bool) -> Result<(), Error> {
-        if path.is_file() {
-            self.eval_script(path)
-        } else {
-            if !watch {
-                self.eval_dir(path)?;
-            } else {
-                use mount_watcher::{MountWatcher, WatchControl};
-                use std::{sync::mpsc, time::Instant};
+    fn watch(&self, path: &Path) -> Result<(), Error> {
+        use mount_watcher::{MountWatcher, WatchControl};
+        use std::{sync::mpsc, time::Instant};
 
-                let mount_point = path.to_str().unwrap_or_default().to_owned();
-                let (tx, rx) = mpsc::channel::<Instant>();
+        let mount_point = path.to_str().unwrap_or_default().to_owned();
+        let (tx, rx) = mpsc::channel::<Instant>();
 
-                let _ = MountWatcher::new(move |ev| {
-                    if ev.mounted.iter().any(|m| m.mount_point == mount_point) {
-                        tx.send(Instant::now()).ok();
-                    }
-                    WatchControl::Continue
-                });
-
-                let mut last_ts = None;
-                for ts in rx {
-                    last_ts = match last_ts {
-                        Some(last_ts) if ts.duration_since(last_ts).as_secs() > 1 => Some(ts),
-                        None => Some(ts),
-                        _ => continue,
-                    };
-                    self.eval_dir(path).ok();
-                }
+        let _ = MountWatcher::new(move |ev| {
+            if ev.mounted.iter().any(|m| m.mount_point == mount_point) {
+                tx.send(Instant::now()).ok();
             }
-            Ok(())
+            WatchControl::Continue
+        });
+
+        let mut last_ts = None;
+        for ts in rx {
+            last_ts = match last_ts {
+                Some(last_ts) if ts.duration_since(last_ts).as_secs() > 1 => Some(ts),
+                None => Some(ts),
+                _ => continue,
+            };
+            self.eval_dir(path).ok();
         }
+        Ok(())
     }
 
-    fn eval_dir(&self, dir: &Path) -> Result<(), Error> {
+    pub fn eval_dir(&self, dir: &Path) -> Result<(), Error> {
         let files = fs::read_dir(dir).map_err(Error::IO)?;
         let files: Vec<PathBuf> = files
             .filter_map(|f| f.ok())
@@ -214,7 +206,6 @@ impl Runner {
             .current_dir(run_dir)
             .env("HASH_SCRIPT", script.path())
             .env("HASH_HOST", &self.host_id)
-            .env("HASH_DECODER", &self.decoder)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
