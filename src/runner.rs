@@ -1,6 +1,7 @@
 use chrono::Utc;
 use std::{
-    fmt, fs, io,
+    fmt, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
 };
@@ -78,7 +79,7 @@ impl Runner {
     pub fn run(host_id: String, decoder: String, path: &Path, watch: bool) -> Result<(), Error> {
         let runner = Self { host_id, decoder };
         if path.is_file() {
-            runner.eval_script(path)
+            runner.eval_script(Script::from_file(path)?)
         } else if watch {
             #[cfg(target_os = "linux")]
             runner.watch(path)?;
@@ -117,7 +118,7 @@ impl Runner {
 
     pub fn eval_dir(&self, dir: &Path) -> Result<(), Error> {
         let files = fs::read_dir(dir).map_err(Error::IO)?;
-        let files: Vec<PathBuf> = files
+        let scripts: Vec<Script> = files
             .filter_map(|f| f.ok())
             .filter_map(|file| {
                 if let Ok(file_type) = file.file_type()
@@ -132,12 +133,13 @@ impl Runner {
                 {
                     return None;
                 }
-                Some(file.path())
+
+                Script::from_file(&file.path()).ok()
             })
             .collect();
 
-        for file in files {
-            if let Err(err) = self.eval_script(&file) {
+        for script in scripts {
+            if let Err(err) = self.eval_script(script) {
                 eprintln!("Script evaluation error: {}", err);
             }
         }
@@ -145,8 +147,7 @@ impl Runner {
         Ok(())
     }
 
-    fn eval_script(&self, path: &Path) -> Result<(), Error> {
-        let script = Script::from_file(path)?;
+    fn eval_script(&self, script: Script) -> Result<(), Error> {
         let mut run_dir = script.parent()?.to_path_buf();
         run_dir.push(format!(
             "{}-run-{}",
@@ -155,7 +156,7 @@ impl Runner {
         ));
         fs::create_dir(&run_dir).map_err(Error::IO)?;
 
-        if let Err(err) = self.spawn(&script, &run_dir) {
+        if let Err(err) = self.spawn(script, &run_dir) {
             run_dir.push("error.log");
             fs::write(run_dir, format!("{}", err))
                 .map_err(Error::IO)
@@ -165,7 +166,7 @@ impl Runner {
         Ok(())
     }
 
-    fn spawn(&self, script: &Script, run_dir: &Path) -> Result<Child, Error> {
+    fn spawn(&self, script: Script, run_dir: &Path) -> Result<Child, Error> {
         let script_len = fs::metadata(&script.path).map_err(Error::IO)?.len();
         if script_len > MAX_SCRIPT_SIZE {
             return Err(Error::UnsupportedScript(script.path.to_path_buf()));
@@ -196,19 +197,36 @@ impl Runner {
             return Err(Error::DecodeFailed(script.path.to_path_buf()));
         }
 
-        let script_text = str::from_utf8(&buf)
-            .map(|s| s.to_owned())
-            .map_err(|_| Error::UnsupportedScript(script.path.to_path_buf()))?;
         let run_dir = run_dir.to_str().unwrap_or_default().to_owned();
 
-        Command::new("sh")
-            .args(["-c", &script_text])
-            .current_dir(run_dir)
+        let text = str::from_utf8(&buf)
+            .map(|s| s.to_owned())
+            .map_err(|_| Error::UnsupportedScript(script.path.to_path_buf()))?;
+        let text = text.trim();
+
+        let args = if let Some(line) = text.lines().next()
+            && line.starts_with("#!")
+        {
+            line.split_at(2).1.split_whitespace().collect()
+        } else {
+            vec!["sh"]
+        };
+
+        let mut child = Command::new(args[0])
+            .args(&args[1..])
             .env("HASH_SCRIPT", script.path())
             .env("HASH_HOST", &self.host_id)
+            .current_dir(run_dir)
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(Error::IO)
+            .map_err(Error::IO)?;
+
+        if let Some(stdin) = &mut child.stdin {
+            stdin.write_all(text.as_bytes()).map_err(Error::IO)?;
+        }
+
+        Ok(child)
     }
 }
