@@ -182,6 +182,7 @@ impl Runner {
             .env("HASH_HOST", &self.host_id)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(Error::IO)?;
 
